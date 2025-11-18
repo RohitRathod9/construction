@@ -1,0 +1,139 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Construction Record Book Design System */
+    --background: 220 14% 96%;
+    --foreground: 215 25% 8%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 8%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 8%;
+
+    /* Primary: Deep Royal Blue #0B3D91 */
+    --primary: 214 81% 31%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Accent: Warm Amber #FFB703 */
+    --accent-color: 41 100% 51%;
+    --accent-foreground: 215 25% 8%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 215 25% 8%;
+
+    /* Muted text #667085 */
+    --muted: 220 13% 91%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Success #2ECC71 */
+    --success: 145 63% 49%;
+    --success-foreground: 0 0% 100%;
+
+    /* Error #D9534F */
+    --destructive: 2 64% 58%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 214 81% 31%;
+
+    --radius: 0.625rem;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 215 28% 12%;
+    --foreground: 220 14% 96%;
+
+    --card: 215 25% 16%;
+    --card-foreground: 220 14% 96%;
+
+    --popover: 215 25% 16%;
+    --popover-foreground: 220 14% 96%;
+
+    --primary: 214 81% 31%;
+    --primary-foreground: 0 0% 100%;
+
+    --accent-color: 41 100% 51%;
+    --accent-foreground: 215 28% 12%;
+
+    --secondary: 215 25% 20%;
+    --secondary-foreground: 220 14% 96%;
+
+    --muted: 215 25% 20%;
+    --muted-foreground: 217 10% 65%;
+
+    --success: 145 63% 49%;
+    --success-foreground: 0 0% 100%;
+
+    --destructive: 2 64% 58%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 25% 20%;
+    --input: 215 25% 20%;
+    --ring: 214 81% 31%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  @font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+  }
+}
+
+@layer utilities {
+  .hover-scale {
+    @apply transition-transform duration-200 hover:scale-105;
+  }
+
+  .card-shadow {
+    box-shadow: 0 6px 18px rgba(11, 29, 60, 0.06);
+  }
+
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2;
+  }
+}
