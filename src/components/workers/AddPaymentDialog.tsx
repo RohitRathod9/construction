@@ -1,164 +1,63 @@
-import { useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { useState, useEffect } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Payment } from "@/lib/mockData";
-import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 
 interface AddPaymentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onAdd: (payment: Omit<Payment, "id">) => void;
-  workerId: string;
-  siteId: string;
+  onAdd: (formData: { amount: number, date: string, notes: string }) => void;
+  isAdding: boolean;
+  maxAmount: number;
 }
 
-export function AddPaymentDialog({ open, onOpenChange, onAdd, workerId, siteId }: AddPaymentDialogProps) {
-  const [formData, setFormData] = useState({
-    amount: 0,
-    date: new Date().toISOString().split("T")[0],
-    type: "salary" as "salary" | "advance" | "bonus",
-    status: "pending" as "paid" | "pending",
-    method: "cash" as "cash" | "bank" | "upi",
-    note: "",
-  });
+export function AddPaymentDialog({ open, onOpenChange, onAdd, isAdding, maxAmount }: AddPaymentDialogProps) {
+  const [amount, setAmount] = useState(0);
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [notes, setNotes] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (formData.amount <= 0) {
-      toast.error("Amount must be greater than 0");
-      return;
+  useEffect(() => {
+    if (open) {
+      // Reset form on open
+      setAmount(maxAmount > 0 ? maxAmount : 0);
+      setDate(new Date().toISOString().split('T')[0]);
+      setNotes("");
     }
+  }, [open, maxAmount]);
 
-    onAdd({
-      ...formData,
-      workerId,
-      siteId,
-    });
-
-    setFormData({
-      amount: 0,
-      date: new Date().toISOString().split("T")[0],
-      type: "salary",
-      status: "pending",
-      method: "cash",
-      note: "",
-    });
-
-    toast.success("Payment added successfully");
+  const handleSubmit = () => {
+    onAdd({ amount, date, notes });
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <form onSubmit={handleSubmit}>
-          <DialogHeader>
-            <DialogTitle>Add Payment</DialogTitle>
-            <DialogDescription>Record a new payment</DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
+        <DialogHeader>
+          <DialogTitle>Add Payment</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="amount">Amount (₹) *</Label>
-              <Input
-                id="amount"
-                type="number"
-                min="1"
-                value={formData.amount}
-                onChange={(e) => setFormData({ ...formData, amount: Number(e.target.value) })}
-                required
-              />
+                <Label htmlFor="amount">Amount (Max: ₹{maxAmount.toFixed(2)})</Label>
+                <Input id="amount" type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} max={maxAmount} min={0.01} />
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="date">Date</Label>
-              <Input
-                id="date"
-                type="date"
-                value={formData.date}
-                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-              />
+             <div className="space-y-2">
+                <Label htmlFor="date">Date</Label>
+                <Input id="date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="type">Type</Label>
-              <Select
-                value={formData.type}
-                onValueChange={(value: "salary" | "advance" | "bonus") => setFormData({ ...formData, type: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="salary">Salary</SelectItem>
-                  <SelectItem value="advance">Advance</SelectItem>
-                  <SelectItem value="bonus">Bonus</SelectItem>
-                </SelectContent>
-              </Select>
+             <div className="space-y-2">
+                <Label htmlFor="notes">Notes (Optional)</Label>
+                <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
             </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={formData.status}
-                onValueChange={(value: "paid" | "pending") => setFormData({ ...formData, status: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="paid">Paid</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="method">Payment Method</Label>
-              <Select
-                value={formData.method}
-                onValueChange={(value: "cash" | "bank" | "upi") => setFormData({ ...formData, method: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="bank">Bank Transfer</SelectItem>
-                  <SelectItem value="upi">UPI</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="note">Note (Optional)</Label>
-              <Textarea
-                id="note"
-                value={formData.note}
-                onChange={(e) => setFormData({ ...formData, note: e.target.value })}
-                rows={3}
-              />
-            </div>
-          </div>
-          
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit">Add Payment</Button>
-          </DialogFooter>
-        </form>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isAdding}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={isAdding || amount <= 0 || amount > maxAmount}>
+            {isAdding && <Loader2 className="w-4 h-4 mr-2 animate-spin" />} Pay
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

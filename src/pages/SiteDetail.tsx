@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { storage } from "@/lib/storage";
-import { Site, Worker } from "@/lib/mockData";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getSiteById, deleteSite } from "@/lib/firebase/firestore.sites";
+import { getWorkersBySite, addWorker } from "@/lib/firebase/firestore.workers";
+import { Site, Worker } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, Plus, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Search, Trash2, Loader2 } from "lucide-react";
 import { WorkersTable } from "@/components/workers/WorkersTable";
 import { AddWorkerDialog } from "@/components/workers/AddWorkerDialog";
 import { WorkerProfileDialog } from "@/components/workers/WorkerProfileDialog";
@@ -13,74 +15,72 @@ import { AdminAuthDialog } from "@/components/sites/AdminAuthDialog";
 import { toast } from "sonner";
 
 const SiteDetail = () => {
-  const { siteId } = useParams();
+  const { siteId } = useParams<{ siteId: string }>();
   const navigate = useNavigate();
-  const [site, setSite] = useState<Site | null>(null);
-  const [workers, setWorkers] = useState<Worker[]>([]);
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showAddWorkerDialog, setShowAddWorkerDialog] = useState(false);
+  const [showDeleteSiteDialog, setShowDeleteSiteDialog] = useState(false);
   const [selectedWorker, setSelectedWorker] = useState<Worker | null>(null);
 
-  useEffect(() => {
-    if (siteId) {
-      loadSiteData();
+  // Fetch site details
+  const { data: site, isLoading: siteLoading, isError: siteError } = useQuery<Site, Error>({
+    queryKey: ["sites", siteId],
+    queryFn: () => getSiteById(siteId!),
+    enabled: !!siteId,
+  });
+
+  // Fetch workers for the site
+  const { data: workers = [], isLoading: workersLoading, isError: workersError } = useQuery<Worker[], Error>({
+    queryKey: ["workers", siteId],
+    queryFn: () => getWorkersBySite(siteId!),
+    enabled: !!siteId,
+  });
+
+  // Mutation for adding a worker
+  const { mutate: addWorkerMutation, isPending: isAddingWorker } = useMutation({
+    mutationFn: (workerData: Omit<Worker, 'id'>) => addWorker(workerData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workers', siteId] });
+      setShowAddWorkerDialog(false);
+      toast.success("Worker added successfully");
+    },
+    onError: (error) => {
+      toast.error("Failed to add worker", { description: error.message });
     }
-  }, [siteId]);
+  });
 
-  const loadSiteData = () => {
-    const sites = storage.getSites();
-    const foundSite = sites.find(s => s.id === siteId);
-    setSite(foundSite || null);
-
-    const allWorkers = storage.getWorkers();
-    const siteWorkers = allWorkers.filter(w => w.siteId === siteId);
-    setWorkers(siteWorkers);
-  };
+  // Mutation for deleting a site
+  const { mutate: deleteSiteMutation, isPending: isDeletingSite } = useMutation({
+    mutationFn: () => deleteSite(siteId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sites'] });
+      toast.success(`Site "${site?.name}" has been deleted`);
+      navigate("/sites");
+    },
+    onError: (error) => {
+      toast.error("Failed to delete site", { description: error.message });
+    }
+  });
 
   const filteredWorkers = workers.filter(w =>
-    w.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    w.phone.includes(searchQuery) ||
-    w.role.toLowerCase().includes(searchQuery.toLowerCase())
+    w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    w.phone.includes(searchQuery)
   );
 
-  const handleAddWorker = (worker: Omit<Worker, "id">) => {
-    const newWorker: Worker = {
-      ...worker,
-      id: `w_${Date.now()}`,
-    };
+  if (siteLoading || workersLoading) {
+    return <div className="flex justify-center items-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  }
 
-    const allWorkers = storage.getWorkers();
-    storage.setWorkers([...allWorkers, newWorker]);
-    storage.addAuditLog("create_worker", `Added worker: ${worker.fullName} to ${site?.name}`);
-    loadSiteData();
-    setShowAddDialog(false);
-    toast.success(`Worker "${worker.fullName}" added successfully`);
-  };
-
-  const handleDeleteSite = () => {
-    if (!site) return;
-    
-    // Get all sites and remove the current one
-    const sites = storage.getSites();
-    const updatedSites = sites.filter(s => s.id !== site.id);
-    
-    // Update storage
-    storage.setSites(updatedSites);
-    storage.addAuditLog("delete_site", `Deleted site: ${site.name}`);
-    
-    // Show success message and navigate back to sites list
-    toast.success(`Site "${site.name}" has been deleted`);
-    navigate("/sites");
-  };
+  if (siteError || workersError) {
+    return <div className="text-red-500 text-center">Error loading site data.</div>;
+  }
 
   if (!site) {
     return (
       <div className="text-center py-12">
         <p className="text-muted-foreground">Site not found</p>
-        <Button onClick={() => navigate("/sites")} className="mt-4">
-          Back to Sites
-        </Button>
+        <Button onClick={() => navigate("/sites")} className="mt-4">Back to Sites</Button>
       </div>
     );
   }
@@ -97,10 +97,11 @@ const SiteDetail = () => {
         </div>
         <Button
           variant="destructive"
-          onClick={() => setShowDeleteDialog(true)}
+          onClick={() => setShowDeleteSiteDialog(true)}
           className="gap-2"
+          disabled={isDeletingSite}
         >
-          <Trash2 className="w-4 h-4" />
+          {isDeletingSite ? <Loader2 className="w-4 h-4 animate-spin"/> : <Trash2 className="w-4 h-4" />}
           Delete Site
         </Button>
       </div>
@@ -109,7 +110,7 @@ const SiteDetail = () => {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>Workers ({filteredWorkers.length})</CardTitle>
-            <Button onClick={() => setShowAddDialog(true)}>
+            <Button onClick={() => setShowAddWorkerDialog(true)}>
               <Plus className="w-4 h-4 mr-2" />
               Add Worker
             </Button>
@@ -119,7 +120,7 @@ const SiteDetail = () => {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              placeholder="Search workers by name, phone, or role..."
+              placeholder="Search workers by name or phone..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10"
@@ -129,32 +130,31 @@ const SiteDetail = () => {
           <WorkersTable
             workers={filteredWorkers}
             onWorkerClick={(worker) => setSelectedWorker(worker)}
-            onRefresh={loadSiteData}
           />
         </CardContent>
       </Card>
 
       <AddWorkerDialog
-        open={showAddDialog}
-        onOpenChange={setShowAddDialog}
-        onAdd={handleAddWorker}
-        defaultSiteId={siteId}
+        open={showAddWorkerDialog}
+        onOpenChange={setShowAddWorkerDialog}
+        onAdd={addWorkerMutation}
+        isAdding={isAddingWorker}
+        siteId={siteId!}
       />
 
       <AdminAuthDialog
-        open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
-        onSuccess={handleDeleteSite}
+        open={showDeleteSiteDialog}
+        onOpenChange={setShowDeleteSiteDialog}
+        onSuccess={() => deleteSiteMutation()}
         title="Delete Site"
         description={`Please enter admin credentials to confirm deletion of "${site.name}". This action cannot be undone.`}
       />
 
       {selectedWorker && (
         <WorkerProfileDialog
-          worker={selectedWorker}
+          workerId={selectedWorker.id}
           open={!!selectedWorker}
           onOpenChange={(open) => !open && setSelectedWorker(null)}
-          onUpdate={loadSiteData}
         />
       )}
     </div>

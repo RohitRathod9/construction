@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { storage } from "@/lib/storage";
 import { toast } from "sonner";
 
 interface AdminAuthDialogProps {
@@ -13,6 +12,16 @@ interface AdminAuthDialogProps {
   title: string;
   description: string;
 }
+
+// Mock function to simulate admin credential verification
+// In a real application, this should be a secure server-side check.
+const verifyAdminCredentials = async (user: string, pass: string): Promise<boolean> => {
+  return new Promise(resolve => {
+    setTimeout(() => {
+      resolve(user === "admin" && pass === "password");
+    }, 1000);
+  });
+};
 
 export function AdminAuthDialog({
   open,
@@ -32,7 +41,7 @@ export function AdminAuthDialog({
     setIsLoading(true);
 
     try {
-      const isAuthenticated = await storage.verifyAdminCredentials(username, password);
+      const isAuthenticated = await verifyAdminCredentials(username, password);
       if (isAuthenticated) {
         onSuccess();
         onOpenChange(false);

@@ -1,23 +1,35 @@
 import { useState } from "react";
-import { Worker } from "@/lib/mockData";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Worker } from "@/lib/types";
+import { deleteWorker } from "@/lib/firebase/firestore.workers";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Download, Trash2 } from "lucide-react";
-import { downloadWorkerReport } from "@/lib/reportGenerator";
+import { Download, Trash2, Loader2 } from "lucide-react";
+import { downloadWorkerReport } from "@/lib/reportGenerator"; // Assuming this is still relevant
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
-import { storage } from "@/lib/storage";
 import { toast } from "sonner";
 
 interface WorkersTableProps {
   workers: Worker[];
   onWorkerClick: (worker: Worker) => void;
-  onRefresh: () => void;
 }
 
-export function WorkersTable({ workers, onWorkerClick, onRefresh }: WorkersTableProps) {
+export function WorkersTable({ workers, onWorkerClick }: WorkersTableProps) {
+  const queryClient = useQueryClient();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [workerToDelete, setWorkerToDelete] = useState<Worker | null>(null);
+
+  const { mutate: deleteWorkerMutation, isPending: isDeleting } = useMutation({
+    mutationFn: (workerId: string) => deleteWorker(workerId),
+    onSuccess: (_, workerId) => {
+        queryClient.invalidateQueries({ queryKey: ['workers'] });
+        toast.success("Worker deleted successfully");
+    },
+    onError: (error) => {
+        toast.error("Failed to delete worker", { description: error.message });
+    }
+  });
 
   const getInitials = (name: string) => {
     return name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
@@ -25,8 +37,8 @@ export function WorkersTable({ workers, onWorkerClick, onRefresh }: WorkersTable
 
   const handleDownloadReport = (e: React.MouseEvent, worker: Worker) => {
     e.stopPropagation();
-    downloadWorkerReport(worker);
-    toast.success(`Report downloaded for ${worker.fullName}`);
+    // downloadWorkerReport(worker); // This needs to be adapted for Firestore data
+    toast.info("Report generation is not yet implemented for Firestore.");
   };
 
   const handleDeleteClick = (e: React.MouseEvent, worker: Worker) => {
@@ -37,21 +49,14 @@ export function WorkersTable({ workers, onWorkerClick, onRefresh }: WorkersTable
 
   const handleDeleteConfirm = () => {
     if (!workerToDelete) return;
-
-    const allWorkers = storage.getWorkers();
-    const updatedWorkers = allWorkers.filter(w => w.id !== workerToDelete.id);
-    storage.setWorkers(updatedWorkers);
-    storage.addAuditLog("delete_worker", `Deleted worker: ${workerToDelete.fullName}`);
-    toast.success(`Worker "${workerToDelete.fullName}" deleted successfully`);
-    onRefresh();
-    setWorkerToDelete(null);
+    deleteWorkerMutation(workerToDelete.id);
+    setDeleteDialogOpen(false);
   };
 
   const getWageBadgeColor = (type: string) => {
     switch (type) {
       case "daily": return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
       case "hourly": return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
-      case "monthly": return "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
       default: return "";
     }
   };
@@ -72,11 +77,9 @@ export function WorkersTable({ workers, onWorkerClick, onRefresh }: WorkersTable
           <thead className="border-b border-border">
             <tr className="text-left">
               <th className="pb-3 text-sm font-medium text-muted-foreground">Worker</th>
-              <th className="pb-3 text-sm font-medium text-muted-foreground">Role</th>
               <th className="pb-3 text-sm font-medium text-muted-foreground">Phone</th>
               <th className="pb-3 text-sm font-medium text-muted-foreground">Wage</th>
-              <th className="pb-3 text-sm font-medium text-muted-foreground">Join Date</th>
-              <th className="pb-3 text-sm font-medium text-muted-foreground">Status</th>
+              <th className="pb-3 text-sm font-medium text-muted-foreground">Pending Amount</th>
               <th className="pb-3 text-sm font-medium text-muted-foreground">Actions</th>
             </tr>
           </thead>
@@ -91,28 +94,22 @@ export function WorkersTable({ workers, onWorkerClick, onRefresh }: WorkersTable
                   <div className="flex items-center gap-3">
                     <Avatar className="h-10 w-10">
                       <AvatarFallback className="bg-primary/10 text-primary">
-                        {getInitials(worker.fullName)}
+                        {getInitials(worker.name)}
                       </AvatarFallback>
                     </Avatar>
-                    <span className="font-medium">{worker.fullName}</span>
+                    <span className="font-medium">{worker.name}</span>
                   </div>
                 </td>
-                <td className="py-4">{worker.role}</td>
                 <td className="py-4">{worker.phone}</td>
                 <td className="py-4">
                   <div className="flex items-center gap-2">
                     <Badge className={getWageBadgeColor(worker.wageType)}>
                       {worker.wageType}
                     </Badge>
-                    <span className="text-sm">₹{worker.wageValue}</span>
+                    <span className="text-sm">₹{worker.wageAmount}</span>
                   </div>
                 </td>
-                <td className="py-4 text-sm">{new Date(worker.joinDate).toLocaleDateString()}</td>
-                <td className="py-4">
-                  <Badge variant={worker.isActive ? "default" : "secondary"}>
-                    {worker.isActive ? "Active" : "Inactive"}
-                  </Badge>
-                </td>
+                <td className="py-4 text-sm font-medium">₹{worker.pendingAmount.toFixed(2)}</td>
                 <td className="py-4">
                   <div className="flex items-center gap-2">
                     <Button
@@ -121,14 +118,15 @@ export function WorkersTable({ workers, onWorkerClick, onRefresh }: WorkersTable
                       onClick={(e) => handleDownloadReport(e, worker)}
                     >
                       <Download className="w-4 h-4 mr-1" />
-                      Download
+                      Report
                     </Button>
                     <Button
                       size="sm"
                       variant="ghost"
                       onClick={(e) => handleDeleteClick(e, worker)}
+                      disabled={isDeleting && workerToDelete?.id === worker.id}
                     >
-                      <Trash2 className="w-4 h-4 text-destructive" />
+                      {isDeleting && workerToDelete?.id === worker.id ? <Loader2 className="w-4 h-4 animate-spin"/> : <Trash2 className="w-4 h-4 text-destructive" />}
                     </Button>
                   </div>
                 </td>
@@ -150,52 +148,40 @@ export function WorkersTable({ workers, onWorkerClick, onRefresh }: WorkersTable
               <div className="flex items-center gap-3">
                 <Avatar className="h-12 w-12">
                   <AvatarFallback className="bg-primary/10 text-primary">
-                    {getInitials(worker.fullName)}
+                    {getInitials(worker.name)}
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <h3 className="font-medium">{worker.fullName}</h3>
-                  <p className="text-sm text-muted-foreground">{worker.role}</p>
+                  <h3 className="font-medium">{worker.name}</h3>
+                  <p className="text-sm text-muted-foreground">{worker.phone}</p>
                 </div>
               </div>
-              <Badge variant={worker.isActive ? "default" : "secondary"}>
-                {worker.isActive ? "Active" : "Inactive"}
-              </Badge>
-            </div>
-            
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div>
-                <p className="text-muted-foreground">Phone</p>
-                <p>{worker.phone}</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Join Date</p>
-                <p>{new Date(worker.joinDate).toLocaleDateString()}</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-2">
               <Badge className={getWageBadgeColor(worker.wageType)}>
-                {worker.wageType}
+                {worker.wageType} - ₹{worker.wageAmount}
               </Badge>
-              <span className="text-sm">₹{worker.wageValue}</span>
             </div>
             
-            <div className="flex gap-2">
+            <div className="text-sm">
+                <p className="text-muted-foreground">Pending Amount</p>
+                <p className="font-medium">₹{worker.pendingAmount.toFixed(2)}</p>
+            </div>
+            
+            <div className="flex gap-2 mt-2">
               <Button 
                 className="flex-1" 
                 size="sm"
                 onClick={(e) => handleDownloadReport(e, worker)}
               >
                 <Download className="w-4 h-4 mr-2" />
-                Download
+                Report
               </Button>
               <Button 
                 variant="destructive" 
                 size="sm"
                 onClick={(e) => handleDeleteClick(e, worker)}
+                disabled={isDeleting && workerToDelete?.id === worker.id}
               >
-                <Trash2 className="w-4 h-4" />
+                 {isDeleting && workerToDelete?.id === worker.id ? <Loader2 className="w-4 h-4 animate-spin"/> : <Trash2 className="w-4 h-4" />}
               </Button>
             </div>
           </div>
@@ -207,7 +193,9 @@ export function WorkersTable({ workers, onWorkerClick, onRefresh }: WorkersTable
         onOpenChange={setDeleteDialogOpen}
         onConfirm={handleDeleteConfirm}
         title="Delete Worker"
-        description="Are you sure you want to permanently delete this worker? This action cannot be undone."
+        description={`Are you sure you want to permanently delete "${workerToDelete?.name}"? This action cannot be undone.`}
+        isDestructive={true}
+        isPerformingAction={isDeleting}
       />
     </div>
   );

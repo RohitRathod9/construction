@@ -1,133 +1,109 @@
-import { useState, useEffect } from "react";
-import { storage } from "@/lib/storage";
-import { Payment } from "@/lib/mockData";
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getPaymentsByWorker, addPayment } from "@/lib/firebase/firestore.payments";
+import { getWorkerById, updateWorker } from "@/lib/firebase/firestore.workers";
+import { Payment, Worker } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Plus, IndianRupee } from "lucide-react";
-import { AddPaymentDialog } from "./AddPaymentDialog";
+import { Plus, IndianRupee, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { AddPaymentDialog } from "./AddPaymentDialog";
 
 interface WorkerPaymentsProps {
   workerId: string;
   siteId: string;
-  onUpdate: () => void;
 }
 
-export function WorkerPayments({ workerId, siteId, onUpdate }: WorkerPaymentsProps) {
-  const [payments, setPayments] = useState<Payment[]>([]);
+export function WorkerPayments({ workerId, siteId }: WorkerPaymentsProps) {
+  const queryClient = useQueryClient();
   const [showAddDialog, setShowAddDialog] = useState(false);
 
-  useEffect(() => {
-    loadPayments();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workerId]);
+  const { data: worker, isLoading: workerLoading } = useQuery<Worker | null>({
+    queryKey: ["workers", workerId],
+    queryFn: () => getWorkerById(workerId),
+  });
 
-  const loadPayments = () => {
-    const allPayments = storage.getPayments();
-    const workerPayments = allPayments
-      .filter(p => p.workerId === workerId)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    setPayments(workerPayments);
-  };
+  const { data: payments = [], isLoading: paymentsLoading } = useQuery<Payment[]>({
+    queryKey: ["payments", workerId],
+    queryFn: () => getPaymentsByWorker(workerId),
+  });
 
-  const currentWorker = storage.getWorkers().find(w => w.id === workerId);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const wageAccruedPending = (currentWorker && (currentWorker as any).pendingAmount) ? (currentWorker as any).pendingAmount : 0;
-  const sumPaid = payments.filter(p => p.status === "paid").reduce((sum, p) => sum + p.amount, 0);
-  const sumPending = payments.filter(p => p.status === "pending").reduce((sum, p) => sum + p.amount, 0);
-  const totalPaid = sumPaid;
-  const totalPending = Math.max(0, wageAccruedPending + sumPending - sumPaid);
+  const { mutate: addPaymentMutation, isPending: isAdding } = useMutation({
+    mutationFn: async (newData: Omit<Payment, "id">) => {
+        // Note: Business logic for amounts is now in a transaction-like manner
+        const newPayment = await addPayment(newData);
+        if (worker) {
+            const newPendingAmount = (worker.pendingAmount || 0) - newPayment.amount;
+            const newPaidAmount = (worker.paidAmount || 0) + newPayment.amount;
+            await updateWorker(workerId, { 
+                pendingAmount: newPendingAmount,
+                paidAmount: newPaidAmount,
+             });
+        }
+        return newPayment;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['payments', workerId] });
+      queryClient.invalidateQueries({ queryKey: ['workers', workerId] });
+      setShowAddDialog(false);
+      toast.success("Payment recorded successfully");
+    },
+    onError: (error) => {
+      toast.error("Failed to record payment", { description: error.message });
+    },
+  });
 
-  const handleAddPayment = (payment: Omit<Payment, "id">) => {
-    if (payment.amount <= 0) {
-      toast.error("Payment amount must be greater than 0");
-      return;
+  const handleAddPayment = (formData: { amount: number, date: string, notes: string }) => {
+    if (formData.amount <= 0) {
+        toast.error("Amount must be positive");
+        return;
     }
-
-    const newPayment: Payment = {
-      ...payment,
-      id: `p_${Date.now()}`,
-      workerId,
-      siteId,
-      date: payment.date || new Date().toISOString().split("T")[0],
-    };
-
-    const allPayments = storage.getPayments();
-    storage.setPayments([...allPayments, newPayment]);
-
-    loadPayments();
-    onUpdate();
-    setShowAddDialog(false);
-
-    const updatedPaid = totalPaid + (newPayment.status === "paid" ? newPayment.amount : 0);
-    const updatedPending = Math.max(0, (wageAccruedPending + sumPending - sumPaid) + (newPayment.status === "pending" ? newPayment.amount : -newPayment.amount));
-
-    storage.addAuditLog(
-      "payment_added",
-      `Payment of ₹${newPayment.amount.toFixed(2)} added for worker ${workerId} at site ${siteId}. ` +
-      `Totals → Pending: ₹${updatedPending.toFixed(2)}, Paid: ₹${updatedPaid.toFixed(2)}`
-    );
-
-    toast.success("Payment added successfully");
+    if ((worker?.pendingAmount ?? 0) < formData.amount) {
+        toast.error("Payment exceeds pending amount");
+        return;
+    }
+    addPaymentMutation({ ...formData, workerId, siteId });
   };
+
+  if (workerLoading || paymentsLoading) {
+    return <div className="flex justify-center items-center h-48"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  }
 
   return (
     <>
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle>Payment History</CardTitle>
-            <Button size="sm" onClick={() => setShowAddDialog(true)}>
+            <CardTitle>Payments</CardTitle>
+            <Button size="sm" onClick={() => setShowAddDialog(true)} disabled={!worker || worker.pendingAmount <= 0}>
               <Plus className="w-4 h-4 mr-2" />
               Add Payment
             </Button>
           </div>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-4 mb-6">
-            <div className="p-4 bg-success/10 rounded-lg">
-              <p className="text-sm text-muted-foreground mb-1">Total Paid</p>
-              <p className="text-2xl font-bold flex items-center">
-                <IndianRupee className="w-5 h-5" />
-                {totalPaid.toLocaleString()}
-              </p>
+        <CardContent className="space-y-4">
+             <div className="grid grid-cols-2 gap-4 text-center p-4 bg-muted/50 rounded-lg">
+                <div>
+                    <p className="text-sm text-muted-foreground">Pending</p>
+                    <p className="text-2xl font-bold text-orange-500">₹{worker?.pendingAmount.toFixed(2)}</p>
+                </div>
+                <div>
+                    <p className="text-sm text-muted-foreground">Paid</p>
+                    <p className="text-2xl font-bold text-green-500">₹{worker?.paidAmount.toFixed(2)}</p>
+                </div>
             </div>
-            <div className="p-4 bg-destructive/10 rounded-lg">
-              <p className="text-sm text-muted-foreground mb-1">Total Pending</p>
-              <p className="text-2xl font-bold flex items-center">
-                <IndianRupee className="w-5 h-5" />
-                {totalPending.toLocaleString()}
-              </p>
-            </div>
-          </div>
 
+          {/* Payments List */}
           {payments.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">No payment records</p>
           ) : (
-            <div className="space-y-3">
-              {payments.map(payment => (
-                <div key={payment.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge variant={payment.status === "paid" ? "default" : "secondary"}>
-                        {payment.status}
-                      </Badge>
-                      <Badge variant="outline">{payment.type}</Badge>
-                      {payment.method && <Badge variant="outline">{payment.method}</Badge>}
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      {new Date(payment.date).toLocaleDateString()}
-                    </p>
-                    {payment.note && (
-                      <p className="text-sm text-muted-foreground mt-1">{payment.note}</p>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xl font-bold flex items-center">
-                      <IndianRupee className="w-4 h-4" />
-                      {payment.amount.toLocaleString()}
-                    </p>
+            <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
+              {payments.map(record => (
+                <div key={record.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                  <div>
+                    <p className="font-medium">₹{record.amount.toFixed(2)}</p>
+                    <p className="text-sm text-muted-foreground">{new Date(record.date).toLocaleDateString()}</p>
+                    {record.notes && <p className="text-xs italic text-muted-foreground pt-1">{record.notes}</p>}
                   </div>
                 </div>
               ))}
@@ -140,8 +116,8 @@ export function WorkerPayments({ workerId, siteId, onUpdate }: WorkerPaymentsPro
         open={showAddDialog}
         onOpenChange={setShowAddDialog}
         onAdd={handleAddPayment}
-        workerId={workerId}
-        siteId={siteId}
+        isAdding={isAdding}
+        maxAmount={worker?.pendingAmount ?? 0}
       />
     </>
   );

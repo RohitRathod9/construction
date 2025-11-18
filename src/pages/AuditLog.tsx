@@ -1,25 +1,22 @@
-import { useEffect, useState } from "react";
-import { storage } from "@/lib/storage";
-import { AuditLog } from "@/lib/mockData";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getAuditLogs } from "@/lib/firebase/firestore.audit";
+import { AuditLog } from "@/lib/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Clock, Search } from "lucide-react";
+import { Clock, Search, Loader2 } from "lucide-react";
 
 const AuditLogPage = () => {
-  const [logs, setLogs] = useState<AuditLog[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
 
-  useEffect(() => {
-    loadLogs();
-  }, []);
-
-  const loadLogs = () => {
-    setLogs(storage.getAuditLogs());
-  };
+  const { data: logs = [], isLoading } = useQuery<AuditLog[]>({
+    queryKey: ["auditLogs"],
+    queryFn: getAuditLogs,
+  });
 
   const filteredLogs = logs.filter(log =>
     log.action.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    log.details.toLowerCase().includes(searchQuery.toLowerCase())
+    (log.details && log.details.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   return (
@@ -44,7 +41,9 @@ const AuditLogPage = () => {
             />
           </div>
 
-          {filteredLogs.length === 0 ? (
+          {isLoading ? (
+             <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 animate-spin" /></div>
+          ) : filteredLogs.length === 0 ? (
             <p className="text-center text-muted-foreground py-12">No audit logs found</p>
           ) : (
             <div className="space-y-3">
@@ -53,7 +52,7 @@ const AuditLogPage = () => {
                   <Clock className="w-5 h-5 text-muted-foreground flex-shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium text-sm">{log.action}</span>
+                      <span className="font-medium text-sm capitalize">{log.action.replace(/_/g, ' ')}</span>
                       <span className="text-xs text-muted-foreground">
                         {new Date(log.timestamp).toLocaleString()}
                       </span>

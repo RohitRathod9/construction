@@ -3,15 +3,11 @@ import { Outlet, useNavigate } from "react-router-dom";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { Topbar } from "./Topbar";
-import { initializeLocalStorage } from "@/lib/mockData";
 
 const Layout = () => {
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
-    initializeLocalStorage();
-    
     // Check for auth token
     const token = localStorage.getItem("crb_token");
     if (!token) {

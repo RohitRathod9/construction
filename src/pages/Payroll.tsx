@@ -1,47 +1,66 @@
-import { useEffect, useState } from "react";
+import { useState, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { storage } from "@/lib/storage";
-import { Site, Worker, Attendance, Payment } from "@/lib/mockData";
+import { useQuery } from "@tanstack/react-query";
+import { Site, Worker } from "@/lib/types";
+import { getSites } from "@/lib/firebase/firestore.sites";
+import { getWorkersBySite } from "@/lib/firebase/firestore.workers";
+import { getAttendanceByWorker } from "@/lib/firebase/firestore.attendance";
+import { getPaymentsByWorker } from "@/lib/firebase/firestore.payments";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Download, FileText, IndianRupee } from "lucide-react";
+import { Download, FileText, IndianRupee, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 const Payroll = () => {
   const [searchParams] = useSearchParams();
-  const [sites, setSites] = useState<Site[]>([]);
   const [selectedSiteId, setSelectedSiteId] = useState(searchParams.get("site") || "");
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [payrollData, setPayrollData] = useState<any[]>([]);
 
-  useEffect(() => {
-    setSites(storage.getSites());
-  }, []);
+  const { data: sites = [], isLoading: sitesLoading } = useQuery<Site[]>({
+    queryKey: ["sites"],
+    queryFn: getSites,
+  });
 
-  useEffect(() => {
-    if (selectedSiteId) {
-      calculatePayroll();
-    }
-  }, [selectedSiteId, selectedMonth]);
+  const { data: workers = [], isLoading: workersLoading } = useQuery<Worker[]>({
+    queryKey: ["workers", selectedSiteId],
+    queryFn: () => getWorkersBySite(selectedSiteId),
+    enabled: !!selectedSiteId,
+  });
 
-  const calculatePayroll = () => {
-    const workers = storage.getWorkers().filter(w => w.siteId === selectedSiteId && w.isActive);
-    const attendance = storage.getAttendance();
-    const payments = storage.getPayments();
+  const { data: payrollDetails, isLoading: detailsLoading } = useQuery({
+    queryKey: ["payrollDetails", selectedSiteId, selectedMonth, workers],
+    queryFn: async () => {
+      if (!workers || workers.length === 0) return { attendance: [], payments: [] };
+      const monthStart = `${selectedMonth}-01`;
+      const monthEnd = new Date(selectedMonth + "-01");
+      monthEnd.setMonth(monthEnd.getMonth() + 1);
+      monthEnd.setDate(0);
+      const monthEndStr = monthEnd.toISOString().split("T")[0];
 
-    const monthStart = `${selectedMonth}-01`;
-    const monthEnd = new Date(selectedMonth + "-01");
-    monthEnd.setMonth(monthEnd.getMonth() + 1);
-    monthEnd.setDate(0);
-    const monthEndStr = monthEnd.toISOString().split("T")[0];
+      const attendancePromises = workers.map(w => getAttendanceByWorker(w.id));
+      const paymentPromises = workers.map(w => getPaymentsByWorker(w.id));
 
-    const data = workers.map(worker => {
-      const workerAttendance = attendance.filter(
-        a => a.workerId === worker.id && a.date >= monthStart && a.date <= monthEndStr
-      );
+      const allAttendance = (await Promise.all(attendancePromises)).flat();
+      const allPayments = (await Promise.all(paymentPromises)).flat();
+      
+      const monthlyAttendance = allAttendance.filter(a => a.date >= monthStart && a.date <= monthEndStr);
+      const monthlyPayments = allPayments.filter(p => p.date >= monthStart && p.date <= monthEndStr);
 
+      return { attendance: monthlyAttendance, payments: monthlyPayments };
+    },
+    enabled: !!selectedSiteId && !!workers && workers.length > 0,
+  });
+
+  const payrollData = useMemo(() => {
+    if (!workers.length || !payrollDetails) return [];
+
+    const activeWorkers = workers.filter(w => w.isActive);
+
+    return activeWorkers.map(worker => {
+      const workerAttendance = payrollDetails.attendance.filter(a => a.workerId === worker.id);
+      
       let grossSalary = 0;
       let warnings: string[] = [];
 
@@ -49,24 +68,20 @@ const Payroll = () => {
         const totalHours = workerAttendance.reduce((sum, a) => sum + (a.totalHours || 0), 0);
         grossSalary = totalHours * worker.wageValue;
       } else if (worker.wageType === "daily") {
-        const daysPresent = workerAttendance.length;
-        grossSalary = daysPresent * worker.wageValue;
+        const daysPresent = workerAttendance.filter(a => a.status === 'present' || a.status === 'halfday').length;
+        const halfDays = workerAttendance.filter(a => a.status === 'halfday').length;
+        grossSalary = (daysPresent - halfDays * 0.5) * worker.wageValue;
       } else if (worker.wageType === "monthly") {
         grossSalary = worker.wageValue;
       }
-
-      // Check for missing timeOut
-      const missingTimeOut = workerAttendance.some(a => !a.timeOut);
-      if (missingTimeOut) {
+      
+      if (workerAttendance.some(a => a.status === 'present' && !a.timeOut)) {
         warnings.push("Missing check-out times");
       }
 
-      const advances = payments.filter(
-        p => p.workerId === worker.id && 
-        p.type === "advance" && 
-        p.date >= monthStart && 
-        p.date <= monthEndStr
-      ).reduce((sum, p) => sum + p.amount, 0);
+      const advances = payrollDetails.payments
+        .filter(p => p.workerId === worker.id)
+        .reduce((sum, p) => sum + p.amount, 0);
 
       const netSalary = grossSalary - advances;
 
@@ -77,36 +92,35 @@ const Payroll = () => {
         advances,
         netSalary,
         warnings,
+        daysPresent: workerAttendance.filter(a => a.status === 'present' || a.status === 'halfday').length,
       };
     });
+  }, [workers, payrollDetails]);
 
-    setPayrollData(data);
-  };
+  const isLoading = sitesLoading || workersLoading || detailsLoading;
 
   const totalGross = payrollData.reduce((sum, d) => sum + d.grossSalary, 0);
   const totalAdvances = payrollData.reduce((sum, d) => sum + d.advances, 0);
   const totalNet = payrollData.reduce((sum, d) => sum + d.netSalary, 0);
 
   const handleGeneratePayslips = () => {
-    toast.info("Generating payslips...", { duration: 2000 });
-    
+    toast.info("Generating payslips...", { duration: 1500 });
     setTimeout(() => {
-      toast.success("Payslips generated! (Simulated - would download ZIP of PDFs)");
-      storage.addAuditLog("generate_payslips", `Generated payslips for ${payrollData.length} workers`);
+      toast.success("Payslips generated! (Simulated PDF download)");
     }, 1500);
   };
 
   const handleExportCSV = () => {
     const csvContent = [
-      ["Worker Name", "Role", "Wage Type", "Days/Hours", "Gross Salary", "Advances", "Net Salary", "Warnings"],
+      ["Worker Name", "Role", "Wage Type", "Days Present", "Gross Salary", "Advances", "Net Salary", "Warnings"],
       ...payrollData.map(d => [
         d.worker.fullName,
         d.worker.role,
         d.worker.wageType,
-        d.attendance.length.toString(),
-        d.grossSalary.toString(),
-        d.advances.toString(),
-        d.netSalary.toString(),
+        d.daysPresent.toString(),
+        d.grossSalary.toFixed(2),
+        d.advances.toFixed(2),
+        d.netSalary.toFixed(2),
         d.warnings.join("; ")
       ])
     ].map(row => row.join(",")).join("\n");
@@ -115,7 +129,7 @@ const Payroll = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `payroll_${selectedMonth}.csv`;
+    a.download = `payroll_${selectedSiteId}_${selectedMonth}.csv`;
     a.click();
     toast.success("Payroll CSV exported");
   };
@@ -135,7 +149,7 @@ const Payroll = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label>Site</Label>
-              <Select value={selectedSiteId} onValueChange={setSelectedSiteId}>
+              <Select value={selectedSiteId} onValueChange={setSelectedSiteId} disabled={sitesLoading}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select site" />
                 </SelectTrigger>
@@ -160,53 +174,53 @@ const Payroll = () => {
             </div>
 
             <div className="flex items-end gap-2">
-              <Button onClick={handleExportCSV} variant="outline" disabled={!selectedSiteId}>
-                <Download className="w-4 h-4 mr-2" />
-                Export CSV
-              </Button>
-              <Button onClick={handleGeneratePayslips} disabled={!selectedSiteId}>
-                <FileText className="w-4 h-4 mr-2" />
-                Generate Payslips
-              </Button>
+                <Button onClick={handleExportCSV} variant="outline" disabled={isLoading || payrollData.length === 0}>
+                    <Download className="w-4 h-4 mr-2" />
+                    Export CSV
+                </Button>
+                <Button onClick={handleGeneratePayslips} disabled={isLoading || payrollData.length === 0}>
+                    <FileText className="w-4 h-4 mr-2" />
+                    Generate Payslips
+                </Button>
             </div>
           </div>
         </CardContent>
       </Card>
+      
+      {isLoading && <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 animate-spin" /></div>}
 
-      {selectedSiteId && payrollData.length > 0 && (
+      {!isLoading && selectedSiteId && payrollData.length > 0 && (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <Card>
+             <Card>
               <CardContent className="pt-6">
                 <div className="text-center">
                   <p className="text-sm text-muted-foreground mb-2">Gross Salary</p>
                   <p className="text-3xl font-bold flex items-center justify-center text-primary">
                     <IndianRupee className="w-6 h-6" />
-                    {totalGross.toLocaleString()}
+                    {totalGross.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                   </p>
                 </div>
               </CardContent>
             </Card>
-
             <Card>
               <CardContent className="pt-6">
                 <div className="text-center">
                   <p className="text-sm text-muted-foreground mb-2">Total Advances</p>
                   <p className="text-3xl font-bold flex items-center justify-center text-destructive">
                     <IndianRupee className="w-6 h-6" />
-                    {totalAdvances.toLocaleString()}
+                    {totalAdvances.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                   </p>
                 </div>
               </CardContent>
             </Card>
-
             <Card>
               <CardContent className="pt-6">
                 <div className="text-center">
                   <p className="text-sm text-muted-foreground mb-2">Net Payable</p>
-                  <p className="text-3xl font-bold flex items-center justify-center text-success">
+                  <p className="text-3xl font-bold flex items-center justify-center" style={{color: 'var(--success)'}}>
                     <IndianRupee className="w-6 h-6" />
-                    {totalNet.toLocaleString()}
+                    {totalNet.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                   </p>
                 </div>
               </CardContent>
@@ -220,27 +234,25 @@ const Payroll = () => {
             <CardContent>
               <div className="overflow-x-auto">
                 <table className="w-full">
-                  <thead className="border-b border-border">
-                    <tr className="text-left">
-                      <th className="pb-3 text-sm font-medium text-muted-foreground">Worker</th>
-                      <th className="pb-3 text-sm font-medium text-muted-foreground">Role</th>
-                      <th className="pb-3 text-sm font-medium text-muted-foreground">Days/Hours</th>
-                      <th className="pb-3 text-sm font-medium text-muted-foreground">Gross</th>
-                      <th className="pb-3 text-sm font-medium text-muted-foreground">Advances</th>
-                      <th className="pb-3 text-sm font-medium text-muted-foreground">Net</th>
-                      <th className="pb-3 text-sm font-medium text-muted-foreground">Status</th>
+                  <thead>
+                    <tr className="text-left border-b">
+                      <th className="p-3 text-sm font-medium text-muted-foreground">Worker</th>
+                      <th className="p-3 text-sm font-medium text-muted-foreground">Days</th>
+                      <th className="p-3 text-sm font-medium text-muted-foreground text-right">Gross</th>
+                      <th className="p-3 text-sm font-medium text-muted-foreground text-right">Advances</th>
+                      <th className="p-3 text-sm font-medium text-muted-foreground text-right">Net</th>
+                      <th className="p-3 text-sm font-medium text-muted-foreground">Warnings</th>
                     </tr>
                   </thead>
                   <tbody>
                     {payrollData.map((data) => (
-                      <tr key={data.worker.id} className="border-b border-border">
-                        <td className="py-4 font-medium">{data.worker.fullName}</td>
-                        <td className="py-4">{data.worker.role}</td>
-                        <td className="py-4">{data.attendance.length}</td>
-                        <td className="py-4">₹{data.grossSalary.toLocaleString()}</td>
-                        <td className="py-4 text-destructive">₹{data.advances.toLocaleString()}</td>
-                        <td className="py-4 font-bold">₹{data.netSalary.toLocaleString()}</td>
-                        <td className="py-4">
+                      <tr key={data.worker.id} className="border-b">
+                        <td className="p-3 font-medium">{data.worker.fullName} <br/><span className="text-xs text-muted-foreground">{data.worker.role}</span></td>
+                        <td className="p-3">{data.daysPresent}</td>
+                        <td className="p-3 text-right">₹{data.grossSalary.toFixed(2)}</td>
+                        <td className="p-3 text-right text-destructive">₹{data.advances.toFixed(2)}</td>
+                        <td className="p-3 text-right font-bold">₹{data.netSalary.toFixed(2)}</td>
+                        <td className="p-3">
                           {data.warnings.length > 0 && (
                             <span className="text-xs text-amber-600">{data.warnings.join(", ")}</span>
                           )}
@@ -255,10 +267,10 @@ const Payroll = () => {
         </>
       )}
 
-      {selectedSiteId && payrollData.length === 0 && (
+      {!isLoading && selectedSiteId && payrollData.length === 0 && (
         <Card>
           <CardContent className="text-center py-12">
-            <p className="text-muted-foreground">No workers found for this site</p>
+            <p className="text-muted-foreground">No payroll data for the selected site and month.</p>
           </CardContent>
         </Card>
       )}

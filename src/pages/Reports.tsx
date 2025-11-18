@@ -1,46 +1,40 @@
-import { useState, useEffect } from "react";
-import { storage } from "@/lib/storage";
+import { useQuery } from "@tanstack/react-query";
+import { getSites } from "@/lib/firebase/firestore.sites";
+import { getAllWorkers } from "@/lib/firebase/firestore.workers";
+import { getAllAttendance } from "@/lib/firebase/firestore.attendance";
+import { getAllPayments } from "@/lib/firebase/firestore.payments";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Download } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 const Reports = () => {
-  const [stats, setStats] = useState({
-    totalSites: 0,
-    totalWorkers: 0,
-    totalAttendance: 0,
-    totalPayments: 0,
-    totalPaid: 0,
-    totalPending: 0,
-  });
+  const { data: sites = [], isLoading: sitesLoading } = useQuery({ queryKey: ["sites"], queryFn: getSites });
+  const { data: workers = [], isLoading: workersLoading } = useQuery({ queryKey: ["allWorkers"], queryFn: getAllWorkers });
+  const { data: attendance = [], isLoading: attendanceLoading } = useQuery({ queryKey: ["allAttendance"], queryFn: getAllAttendance });
+  const { data: payments = [], isLoading: paymentsLoading } = useQuery({ queryKey: ["allPayments"], queryFn: getAllPayments });
 
-  useEffect(() => {
-    loadStats();
-  }, []);
+  const isLoading = sitesLoading || workersLoading || attendanceLoading || paymentsLoading;
 
-  const loadStats = () => {
-    const sites = storage.getSites();
-    const workers = storage.getWorkers();
-    const attendance = storage.getAttendance();
-    const payments = storage.getPayments();
-
-    setStats({
-      totalSites: sites.filter(s => s.isActive).length,
-      totalWorkers: workers.filter(w => w.isActive).length,
-      totalAttendance: attendance.length,
-      totalPayments: payments.length,
-      totalPaid: payments.filter(p => p.status === "paid").reduce((sum, p) => sum + p.amount, 0),
-      totalPending: payments.filter(p => p.status === "pending").reduce((sum, p) => sum + p.amount, 0),
-    });
+  const stats = {
+    totalSites: sites.filter(s => s.isActive).length,
+    totalWorkers: workers.filter(w => w.isActive).length,
+    totalAttendance: attendance.length,
+    totalPayments: payments.length,
+    totalPaid: workers.reduce((sum, w) => sum + w.paidAmount, 0),
+    totalPending: workers.reduce((sum, w) => sum + w.pendingAmount, 0),
   };
 
   const handleExportData = () => {
+    if (isLoading) {
+      toast.error("Data is not ready yet.");
+      return;
+    }
     const data = {
-      sites: storage.getSites(),
-      workers: storage.getWorkers(),
-      attendance: storage.getAttendance(),
-      payments: storage.getPayments(),
+      sites,
+      workers,
+      attendance,
+      payments,
       exportDate: new Date().toISOString(),
     };
 
@@ -52,6 +46,27 @@ const Reports = () => {
     a.click();
     toast.success("Data exported successfully");
   };
+  
+  const handleWorkersCSVExport = () => {
+    const csv = [
+      ["ID", "Name", "Phone", "Role", "Site ID", "Wage Type", "Wage Value", "Join Date", "Status"],
+      ...workers.map(w => [
+        w.id, w.name, w.phone, w.role, w.siteId, w.wageType, w.wage.toString(), w.joinDate, w.isActive ? "Active" : "Inactive"
+      ])
+    ].map(row => row.join(",")).join("\n");
+    
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "workers_export.csv";
+    a.click();
+    toast.success("Workers CSV exported");
+  }
+
+  if (isLoading) {
+    return <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -60,65 +75,37 @@ const Reports = () => {
           <h1 className="text-3xl font-bold text-foreground">Reports & Analytics</h1>
           <p className="text-muted-foreground mt-1">Overview and data exports</p>
         </div>
-        <Button onClick={handleExportData}>
-          <Download className="w-4 h-4 mr-2" />
-          Export All Data
-        </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Active Sites</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-4xl font-bold text-primary">{stats.totalSites}</p>
-          </CardContent>
+          <CardHeader><CardTitle className="text-lg">Active Sites</CardTitle></CardHeader>
+          <CardContent><p className="text-4xl font-bold text-primary">{stats.totalSites}</p></CardContent>
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Active Workers</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-4xl font-bold text-primary">{stats.totalWorkers}</p>
-          </CardContent>
+          <CardHeader><CardTitle className="text-lg">Active Workers</CardTitle></CardHeader>
+          <CardContent><p className="text-4xl font-bold text-primary">{stats.totalWorkers}</p></CardContent>
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Total Attendance Records</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-4xl font-bold text-primary">{stats.totalAttendance}</p>
-          </CardContent>
+          <CardHeader><CardTitle className="text-lg">Total Attendance Records</CardTitle></CardHeader>
+          <CardContent><p className="text-4xl font-bold text-primary">{stats.totalAttendance}</p></CardContent>
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Total Payments</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-4xl font-bold text-primary">{stats.totalPayments}</p>
-          </CardContent>
+          <CardHeader><CardTitle className="text-lg">Total Payments</CardTitle></CardHeader>
+          <CardContent><p className="text-4xl font-bold text-primary">{stats.totalPayments}</p></CardContent>
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Total Paid</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-4xl font-bold text-success">₹{stats.totalPaid.toLocaleString()}</p>
-          </CardContent>
+          <CardHeader><CardTitle className="text-lg">Total Paid</CardTitle></CardHeader>
+          <CardContent><p className="text-4xl font-bold text-green-600">₹{stats.totalPaid.toLocaleString()}</p></CardContent>
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Total Pending</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-4xl font-bold text-destructive">₹{stats.totalPending.toLocaleString()}</p>
-          </CardContent>
+          <CardHeader><CardTitle className="text-lg">Total Pending</CardTitle></CardHeader>
+          <CardContent><p className="text-4xl font-bold text-destructive">₹{stats.totalPending.toLocaleString()}</p></CardContent>
         </Card>
       </div>
 
@@ -143,25 +130,7 @@ const Reports = () => {
               <h3 className="font-medium">Workers CSV</h3>
               <p className="text-sm text-muted-foreground">Export all workers data as CSV</p>
             </div>
-            <Button variant="outline" onClick={() => {
-              const workers = storage.getWorkers();
-              const csv = [
-                ["ID", "Name", "Phone", "Role", "Site ID", "Wage Type", "Wage Value", "Join Date", "Status"],
-                ...workers.map(w => [
-                  w.id, w.fullName, w.phone, w.role, w.siteId,
-                  w.wageType, w.wageValue.toString(), w.joinDate,
-                  w.isActive ? "Active" : "Inactive"
-                ])
-              ].map(row => row.join(",")).join("\n");
-              
-              const blob = new Blob([csv], { type: "text/csv" });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = "workers_export.csv";
-              a.click();
-              toast.success("Workers CSV exported");
-            }}>
+            <Button variant="outline" onClick={handleWorkersCSVExport}>
               <Download className="w-4 h-4 mr-2" />
               Export CSV
             </Button>

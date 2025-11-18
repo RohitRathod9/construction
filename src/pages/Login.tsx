@@ -6,56 +6,44 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Building2 } from "lucide-react";
+import { signInAdmin } from "@/lib/firebase/firebase.auth";
 
 const Login = () => {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [rememberMe, setRememberMe] = useState(false);
+  const [email, setEmail] = useState("admin@company.com"); // Demo email
+  const [password, setPassword] = useState("Password123!"); // Demo password
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [errors, setErrors] = useState<{ email?: string; password?: string, form?: string }>({});
 
   const validateForm = () => {
     const newErrors: { email?: string; password?: string } = {};
-    
-    if (!email) {
-      newErrors.email = "Email is required";
-    } else if (!/\S+@\S+\.\S+/.test(email)) {
-      newErrors.email = "Email is invalid";
-    }
-    
-    if (!password) {
-      newErrors.password = "Password is required";
-    } else if (password.length < 8) {
-      newErrors.password = "Password must be at least 8 characters";
-    }
-    
+    if (!email) newErrors.email = "Email is required";
+    if (!password) newErrors.password = "Password is required";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!validateForm()) return;
 
     setLoading(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    if (email === "admin@company.com" && password === "Password123!") {
-      if (rememberMe) {
-        localStorage.setItem("crb_token", "mock_token_123");
+    setErrors({});
+
+    try {
+      const { user, error } = await signInAdmin(email, password);
+      if (error) {
+        throw error;
       }
       toast.success("Welcome back!");
       navigate("/");
-    } else {
-      toast.error("Invalid credentials. Try admin@company.com / Password123!");
-      setErrors({ email: "Invalid credentials", password: "Invalid credentials" });
+    } catch (error) {
+      console.error("Login failed:", error);
+      toast.error("Login failed", { description: error.message });
+      setErrors({ form: error.message });
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   return (
@@ -78,17 +66,9 @@ const Login = () => {
                 type="email"
                 placeholder="admin@company.com"
                 value={email}
-                onChange={(e) => {
-                  setEmail(e.target.value);
-                  setErrors(prev => ({ ...prev, email: undefined }));
-                }}
-                className={errors.email ? "border-destructive" : ""}
-                aria-invalid={!!errors.email}
-                aria-describedby={errors.email ? "email-error" : undefined}
+                onChange={(e) => setEmail(e.target.value)}
+                className={errors.email || errors.form ? "border-destructive" : ""}
               />
-              {errors.email && (
-                <p id="email-error" className="text-sm text-destructive">{errors.email}</p>
-              )}
             </div>
 
             <div className="space-y-2">
@@ -98,36 +78,21 @@ const Login = () => {
                 type="password"
                 placeholder="Password123!"
                 value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  setErrors(prev => ({ ...prev, password: undefined }));
-                }}
-                className={errors.password ? "border-destructive" : ""}
-                aria-invalid={!!errors.password}
-                aria-describedby={errors.password ? "password-error" : undefined}
+                onChange={(e) => setPassword(e.target.value)}
+                className={errors.password || errors.form ? "border-destructive" : ""}
               />
-              {errors.password && (
-                <p id="password-error" className="text-sm text-destructive">{errors.password}</p>
-              )}
             </div>
 
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="remember"
-                checked={rememberMe}
-                onCheckedChange={(checked) => setRememberMe(checked as boolean)}
-              />
-              <Label htmlFor="remember" className="text-sm font-normal cursor-pointer">
-                Remember me
-              </Label>
-            </div>
+            {errors.form && (
+                <p className="text-sm text-destructive text-center">{errors.form}</p>
+            )}
 
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Signing in..." : "Sign In"}
             </Button>
 
-            <div className="text-sm text-center text-muted-foreground">
-              Demo credentials: admin@company.com / Password123!
+             <div className="text-sm text-center text-muted-foreground">
+              Use a valid Firebase user to sign in.
             </div>
           </form>
         </div>

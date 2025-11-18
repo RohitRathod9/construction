@@ -1,46 +1,52 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { storage } from "@/lib/storage";
-import { Site } from "@/lib/mockData";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getSites, addSite } from "@/lib/firebase/firestore.sites";
+import { Site } from "@/lib/types"; // Assuming you have a types file
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Plus, Search, MapPin, Calendar } from "lucide-react";
+import { Plus, Search, MapPin, Calendar, Loader2 } from "lucide-react";
 import { AddSiteDialog } from "@/components/sites/AddSiteDialog";
 import { toast } from "sonner";
 
 const Sites = () => {
   const navigate = useNavigate();
-  const [sites, setSites] = useState<Site[]>([]);
+  const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState("");
   const [showAddDialog, setShowAddDialog] = useState(false);
 
-  useEffect(() => {
-    loadSites();
-  }, []);
+  // Fetch sites using react-query
+  const { data: sites = [], isLoading, isError, error } = useQuery<Site[], Error>({
+    queryKey: ["sites"],
+    queryFn: getSites,
+  });
 
-  const loadSites = () => {
-    setSites(storage.getSites());
-  };
+  // Mutation for adding a site
+  const { mutate: addSiteMutation, isPending: isAdding } = useMutation({
+    mutationFn: addSite,
+    onSuccess: (newSite) => {
+      queryClient.invalidateQueries({ queryKey: ['sites'] });
+      setShowAddDialog(false);
+      toast.success(`Site "${newSite.name}" created successfully`);
+    },
+    onError: (error) => {
+      toast.error("Failed to create site", { description: error.message });
+    }
+  });
 
   const filteredSites = sites.filter(site =>
     site.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     site.address.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  
+  if (isLoading) {
+    return <div className="flex justify-center items-center h-64"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+  }
 
-  const handleAddSite = (site: Omit<Site, "id">) => {
-    const newSite: Site = {
-      ...site,
-      id: `site_${Date.now()}`,
-    };
-    
-    const updatedSites = [...sites, newSite];
-    storage.setSites(updatedSites);
-    storage.addAuditLog("create_site", `Created site: ${site.name}`);
-    setSites(updatedSites);
-    setShowAddDialog(false);
-    toast.success(`Site "${site.name}" created successfully`);
-  };
+  if (isError) {
+    return <div className="text-red-500 text-center">Error loading sites: {error.message}</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -49,8 +55,8 @@ const Sites = () => {
           <h1 className="text-3xl font-bold text-foreground">Sites</h1>
           <p className="text-muted-foreground mt-1">Manage all construction sites</p>
         </div>
-        <Button onClick={() => setShowAddDialog(true)}>
-          <Plus className="w-4 h-4 mr-2" />
+        <Button onClick={() => setShowAddDialog(true)} disabled={isAdding}>
+          {isAdding ? <Loader2 className="w-4 h-4 mr-2 animate-spin"/> : <Plus className="w-4 h-4 mr-2" />}
           Add Site
         </Button>
       </div>
@@ -100,7 +106,7 @@ const Sites = () => {
         ))}
       </div>
 
-      {filteredSites.length === 0 && (
+      {filteredSites.length === 0 && !isLoading && (
         <Card>
           <CardContent className="text-center py-12">
             <p className="text-muted-foreground">No sites found</p>
@@ -111,7 +117,8 @@ const Sites = () => {
       <AddSiteDialog
         open={showAddDialog}
         onOpenChange={setShowAddDialog}
-        onAdd={handleAddSite}
+        onAdd={addSiteMutation}
+        isAdding={isAdding}
       />
     </div>
   );

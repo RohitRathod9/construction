@@ -15,12 +15,13 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Search, User, LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { ThemeToggle } from "./theme-toggle";
-import { storage } from "@/lib/storage";
-import { Worker } from "@/lib/mockData";
+import { Worker } from "@/lib/types";
 import { WorkerProfileDialog } from "@/components/workers/WorkerProfileDialog";
 import { AddWorkerDialog } from "@/components/workers/AddWorkerDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { getSites } from "@/lib/firebase/firestore.sites";
+import { getAllWorkers, addWorker } from "@/lib/firebase/firestore.workers";
 
 export function Topbar() {
   const navigate = useNavigate();
@@ -33,6 +34,13 @@ export function Topbar() {
   const [showAddWorker, setShowAddWorker] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const [sites, setSites] = useState<any[]>([]);
+  const [workers, setWorkers] = useState<Worker[]>([]);
+
+  useEffect(() => {
+    getSites().then(setSites);
+    getAllWorkers().then(setWorkers);
+  }, []);
 
   const handleLogout = () => {
     localStorage.removeItem("crb_token");
@@ -40,12 +48,11 @@ export function Topbar() {
     navigate("/login");
   };
 
-  const allSites = useMemo(() => storage.getSites(), []);
   const siteNameById = useMemo(() => {
     const map: Record<string, string> = {};
-    allSites.forEach(s => { map[s.id] = s.name; });
+    sites.forEach(s => { map[s.id] = s.name; });
     return map;
-  }, [allSites]);
+  }, [sites]);
 
   useEffect(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -55,7 +62,6 @@ export function Topbar() {
       setActiveIndex(-1);
       return;
     }
-    const workers = storage.getWorkers();
     const matches = workers
       .filter(w => w.fullName.toLowerCase().includes(q))
       .slice(0, 10)
@@ -63,7 +69,7 @@ export function Topbar() {
     setResults(matches);
     setShowResults(true);
     setActiveIndex(matches.length > 0 ? 0 : -1);
-  }, [searchQuery, siteNameById]);
+  }, [searchQuery, siteNameById, workers]);
 
   const handleResultSelect = (idx: number) => {
     const item = results[idx];
@@ -209,7 +215,7 @@ export function Topbar() {
           open={!!selectedWorker}
           onOpenChange={(open) => !open && setSelectedWorker(null)}
           onUpdate={() => {
-            setResults(prev => prev.map(r => ({ ...r })));
+            getAllWorkers().then(setWorkers);
           }}
         />
       )}
@@ -217,10 +223,9 @@ export function Topbar() {
       <AddWorkerDialog
         open={showAddWorker}
         onOpenChange={setShowAddWorker}
-        onAdd={(worker) => {
-          const newWorker: Worker = { ...worker, id: `w_${Date.now()}` };
-          const allWorkers = storage.getWorkers();
-          storage.setWorkers([...allWorkers, newWorker]);
+        onAdd={async (worker) => {
+          const newWorker = await addWorker(worker);
+          setWorkers(prev => [...prev, newWorker]);
           setShowAddWorker(false);
           toast.success(`Worker "${worker.fullName}" added successfully`);
         }}

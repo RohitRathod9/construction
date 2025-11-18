@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -10,31 +10,39 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Site } from "@/lib/mockData";
+import { Site } from "@/lib/types";
+import { Loader2 } from "lucide-react";
 
 interface AddSiteDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAdd: (site: Omit<Site, "id">) => void;
+  isAdding: boolean;
 }
 
-export function AddSiteDialog({ open, onOpenChange, onAdd }: AddSiteDialogProps) {
+export function AddSiteDialog({ open, onOpenChange, onAdd, isAdding }: AddSiteDialogProps) {
   const [formData, setFormData] = useState({
     name: "",
     address: "",
-    createdAt: new Date().toISOString().split("T")[0],
+    createdAt: new Date().toISOString(),
   });
+
+  useEffect(() => {
+    if (open) {
+      // Reset form when dialog opens
+      setFormData({
+        name: "",
+        address: "",
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }, [open]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onAdd({
       ...formData,
       isActive: true,
-    });
-    setFormData({
-      name: "",
-      address: "",
-      createdAt: new Date().toISOString().split("T")[0],
     });
   };
 
@@ -55,6 +63,7 @@ export function AddSiteDialog({ open, onOpenChange, onAdd }: AddSiteDialogProps)
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 required
+                disabled={isAdding}
               />
             </div>
             
@@ -65,25 +74,19 @@ export function AddSiteDialog({ open, onOpenChange, onAdd }: AddSiteDialogProps)
                 value={formData.address}
                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                 required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="createdAt">Start Date</Label>
-              <Input
-                id="createdAt"
-                type="date"
-                value={formData.createdAt}
-                onChange={(e) => setFormData({ ...formData, createdAt: e.target.value })}
+                disabled={isAdding}
               />
             </div>
           </div>
           
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isAdding}>
               Cancel
             </Button>
-            <Button type="submit">Add Site</Button>
+            <Button type="submit" disabled={isAdding}>
+              {isAdding && <Loader2 className="w-4 h-4 mr-2 animate-spin"/>}
+              Add Site
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
