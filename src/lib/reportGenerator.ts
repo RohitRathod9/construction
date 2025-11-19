@@ -1,20 +1,22 @@
-import { Worker, Attendance, Payment } from "./mockData";
-import { storage } from "./storage";
 
-export function generateWorkerReport(worker: Worker, month?: string) {
-  const site = storage.getSites().find(s => s.id === worker.siteId);
-  const allAttendance = storage.getAttendance();
-  const allPayments = storage.getPayments();
+import { getSiteById } from "./firebase/firestore.sites";
+import { getAttendanceByWorker } from "./firebase/firestore.attendance";
+import { getPaymentsByWorker } from "./firebase/firestore.payments";
+import { Worker } from "./types";
+
+export async function generateWorkerReport(worker: Worker, month?: string) {
+  const site = await getSiteById(worker.siteId);
+  const allAttendance = await getAttendanceByWorker(worker.id);
+  const allPayments = await getPaymentsByWorker(worker.id);
 
   // Filter by month if provided (format: YYYY-MM)
   const targetMonth = month || new Date().toISOString().slice(0, 7);
   
   const workerAttendance = allAttendance
-    .filter(a => a.workerId === worker.id && a.date.startsWith(targetMonth))
+    .filter(a => a.date.startsWith(targetMonth))
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
   const workerPayments = allPayments
-    .filter(p => p.workerId === worker.id)
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   // Calculate totals
@@ -23,15 +25,12 @@ export function generateWorkerReport(worker: Worker, month?: string) {
 
   let totalEarned = 0;
   if (worker.wageType === "hourly") {
-    totalEarned = totalHours * worker.wageValue;
+    totalEarned = totalHours * worker.wage;
   } else if (worker.wageType === "daily") {
-    totalEarned = totalDays * worker.wageValue;
-  } else if (worker.wageType === "monthly") {
-    totalEarned = worker.wageValue;
+    totalEarned = totalDays * worker.wage;
   }
 
   const totalPaid = workerPayments
-    .filter(p => p.status === "paid")
     .reduce((sum, p) => sum + p.amount, 0);
 
   const totalPending = totalEarned - totalPaid;
@@ -65,13 +64,11 @@ export function generateWorkerReport(worker: Worker, month?: string) {
   let content = "";
 
   // Worker Information (two-column, no borders)
-  content += addHeading(worker.fullName);
+  content += addHeading(worker.name);
   const valueX = margin + 260;
   content += addKV("Site:", site?.name || "N/A", valueX);
-  content += addKV("Role:", worker.role, valueX);
   content += addKV("Phone:", worker.phone || "", valueX);
-  content += addKV("Join Date:", new Date(worker.joinDate).toLocaleDateString(), valueX);
-  content += addKV("Wage:", `${worker.wageType.charAt(0).toUpperCase()}${worker.wageType.slice(1)} – ₹${worker.wageValue}`, valueX);
+  content += addKV("Wage:", `${worker.wageType.charAt(0).toUpperCase()}${worker.wageType.slice(1)} – ₹${worker.wage}`, valueX);
   y += 16;
 
   content += addHeading("Attendance");
@@ -82,10 +79,10 @@ export function generateWorkerReport(worker: Worker, month?: string) {
     const day = d.getDate().toString();
     const month = d.toLocaleString("en-US", { month: "short" });
     const year = d.getFullYear().toString();
-    const timeIn = new Date(a.timeIn).toTimeString().slice(0, 5);
-    const timeOut = a.timeOut ? new Date(a.timeOut).toTimeString().slice(0, 5) : "";
+    const timeIn = new Date(a.startTime).toTimeString().slice(0, 5);
+    const timeOut = a.endTime ? new Date(a.endTime).toTimeString().slice(0, 5) : "";
     const hours = a.totalHours ? `${a.totalHours}` : "";
-    const status = a.timeOut ? "Present" : "Active";
+    const status = a.endTime ? "Present" : "Active";
 
     content += `<text x="${attXs[0]}" y="${y}" font-family="Arial" font-size="12" font-weight="bold" fill="black">${day}</text>`;
     content += `<text x="${attXs[0] + 24}" y="${y}" font-family="Arial" font-size="12" fill="black">${month} ${year}</text>`;
@@ -99,7 +96,7 @@ export function generateWorkerReport(worker: Worker, month?: string) {
 
   content += addHeading("Payments");
   const payXs = [margin, margin + 150, margin + 240, margin + 320, margin + 400];
-  content += addRow(["Date", "Amount", "Type", "Method", "Status"], payXs);
+  content += addRow(["Date", "Amount", "Method", "Remarks"], payXs);
   workerPayments.forEach(p => {
     const d = new Date(p.date);
     const day = d.getDate().toString();
@@ -108,9 +105,8 @@ export function generateWorkerReport(worker: Worker, month?: string) {
       `<text x="${payXs[0] + 24}" y="${y}" font-family="Arial" font-size="12" fill="black">${month}</text>`;
     content += colsDate;
     content += `<text x="${payXs[1]}" y="${y}" font-family="Arial" font-size="12" fill="black">₹${p.amount}</text>`;
-    content += `<text x="${payXs[2]}" y="${y}" font-family="Arial" font-size="12" fill="black">${p.type}</text>`;
-    content += `<text x="${payXs[3]}" y="${y}" font-family="Arial" font-size="12" fill="black">${p.method || ""}</text>`;
-    content += `<text x="${payXs[4]}" y="${y}" font-family="Arial" font-size="12" fill="black">${p.status}</text>`;
+    content += `<text x="${payXs[2]}" y="${y}" font-family="Arial" font-size="12" fill="black">${p.paymentMethod || ""}</text>`;
+    content += `<text x="${payXs[3]}" y="${y}" font-family="Arial" font-size="12" fill="black">${p.remarks || ""}</text>`;
     y += 16;
   });
   y += 16;
@@ -119,9 +115,9 @@ export function generateWorkerReport(worker: Worker, month?: string) {
   const sumX = margin + 300;
   content += addKV("Total Days Worked:", `${totalDays}`, sumX);
   content += addKV("Total Hours Worked:", `${totalHours.toFixed(2)}`, sumX);
-  content += addKV("Total Pending:", `₹${(totalEarned - totalPaid).toFixed(2)}`, sumX);
+  content += addKV("Total Pending:", `₹${(totalPending).toFixed(2)}`, sumX);
   content += addKV("Total Paid:", `₹${totalPaid.toFixed(2)}`, sumX);
-  content += addKV("Net Payable:", `₹${Math.max(0, totalEarned - totalPaid).toFixed(2)}`, sumX);
+  content += addKV("Net Payable:", `₹${Math.max(0, totalPending).toFixed(2)}`, sumX);
 
   const height = Math.max(800, y + margin);
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${content}</svg>`;
@@ -129,13 +125,13 @@ export function generateWorkerReport(worker: Worker, month?: string) {
   return svg;
 }
 
-export function downloadWorkerReport(worker: Worker, month?: string) {
-  const svg = generateWorkerReport(worker, month);
+export async function downloadWorkerReport(worker: Worker, month?: string) {
+  const svg = await generateWorkerReport(worker, month);
   const blob = new Blob([svg], { type: "image/svg+xml" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${worker.fullName.replace(/\s+/g, "_")}_report_${month || new Date().toISOString().slice(0, 7)}.svg`;
+  a.download = `${worker.name.replace(/\s+/g, "_")}_report_${month || new Date().toISOString().slice(0, 7)}.svg`;
   a.click();
   URL.revokeObjectURL(url);
 }
